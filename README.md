@@ -143,7 +143,7 @@ python inference_throughput_test.py --test_method entire --meta_path /path --ser
 
 |               | 并发数      | batch size | intra | inter | thoughput         |
 |---------------|----------|------------|-------|-------|-------------------|
-| Wide_and_Deep | 60:100:4 | 64         | 1     | -1| 910171 infer/sec  |
+| Wide_and_Deep | 60:104:4 | 64         | 1     | -1| 910171 infer/sec  |
 | DLRM          | 84:120:4 | 256        | 1     | -1| 3357802 infer/sec |
 | DeepFM        | 56:96:4  | 256        | 1     | -1| 1732518 infer/sec |
 | DFFM          | 60:84:4  | 128        | 1     | -1| 1159782 infer/sec |
@@ -154,8 +154,8 @@ python inference_throughput_test.py --test_method entire --meta_path /path --ser
 
 |               | 并发数      | batch size | intra | inter | thoughput         |
 |---------------|----------|------------|-------|-------|-------------------|
-| Wide_and_Deep | 60:100:4 | 128        | 1     | -1| 1094665 infer/sec |
-| DLRM          | 60:100:4 | 256        | 1     | -1| 3155238 infer/sec |
+| Wide_and_Deep | 60:104:4 | 128        | 1     | -1| 1094665 infer/sec |
+| DLRM          | 60:104:4 | 256        | 1     | -1| 3155238 infer/sec |
 | DeepFM        | 64:96:4  | 256        | 1     | -1| 2253597 infer/sec |
 | DFFM          | 64:84:4  | 128        | 1     | -1| 1234029 infer/sec |
 | DSSM          | 60:92:4  | 512        | 1     |-1| 5069130 infer/sec |
