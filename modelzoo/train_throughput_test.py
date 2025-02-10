@@ -10,23 +10,25 @@ from multiprocessing import Process, Queue
 
 def get_numa_info():
     # Run the 'lscpu' command to get the CPU and NUMA node information
-    result = subprocess.run(['lscpu'], stdout=subprocess.PIPE, text=True)
+    result = subprocess.run(["lscpu"], stdout=subprocess.PIPE, text=True)
     output = result.stdout
 
     # NUMA 节点0 CPU：      0-79
-    pattern_numa = re.compile(r'NUMA node\d CPU\(s\):\s*(.*)')
-    pattern_cpu =  re.compile(r"CPU$s$:\s*(\d+)")
+    pattern_numa = re.compile(r"NUMA node\d CPU\(s\):\s*(.*)")
+    pattern_cpu = re.compile(r"CPU\(s\):\s+\d+")
 
     matches_cpu = pattern_cpu.findall(output)
     matches_numa = pattern_numa.findall(output)
     cpu_info = ''
     if matches_cpu:
-        cpu_info = matches_cpu[0]
+        cpu_info = matches_cpu[0].split()[1]
+    else:
+        print("获取CPU信息有误")
 
     numa_info = {}
     if matches_numa:
         for numa_value in matches_numa:
-            numa_node = f'node{len(numa_info)}'
+            numa_node = f"node{len(numa_info)}"
             numa_info[numa_node] = numa_value
     return cpu_info, numa_info
 
@@ -41,7 +43,7 @@ def run_command(cmd):
     """Run a shell command and return its output."""
     process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
-    return stdout.decode('utf-8'), stderr.decode('utf-8')
+    return stdout.decode("utf-8"), stderr.decode("utf-8")
 
 
 def parse_perf_analyzer_output(meta_path, model_name):

@@ -4,10 +4,10 @@ import json
 import math
 import numbers
 import os
-import time
-
+import shutil
 import tensorflow as tf
 from tensorflow.python.ops import partitioned_variables
+import time
 
 # Set to INFO for tracking training, default is WARN. ERROR for least messages
 tf.logging.set_verbosity(tf.logging.INFO)
@@ -29,8 +29,8 @@ TAG_COLUMN = ['tag_category_list', 'tag_brand_list']
 HASH_INPUTS = [
     'pid', 'adgroup_id', 'cate_id', 'campaign_id', 'customer', 'brand',
     'user_id', 'cms_segid', 'cms_group_id', 'final_gender_code', 'age_level',
-    'pvalue_level', 'shopping_level', 'occupation', 'new_user_class_level',
-    'tag_category_list', 'tag_brand_list', 'price'
+    'pvalue_level', 'shopping_level', 'occupation', 'new_user_class_level', 'price',
+    'tag_category_list', 'tag_brand_list',
 ]
 
 HASH_BUCKET_SIZES = {
@@ -106,7 +106,6 @@ class ESMM():
 
         self.feature = input[0]
         self.label = input[1]
-
         self._create_model()
 
         with tf.name_scope('head'):
@@ -191,6 +190,44 @@ class ESMM():
             return tf.variable_scope(name, reuse=tf.AUTO_REUSE).keep_weights(dtype=tf.float32)
         else:
             return tf.variable_scope(name, reuse=tf.AUTO_REUSE)
+
+    def _call(self, features, labels, mode, config):
+        self.feature = features
+        self.label = labels
+        self._create_model()
+
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            self.is_training = True
+            with tf.name_scope('head'):
+                self._create_loss()
+                self._create_optimizer()
+                self._create_metrics()
+
+            chief_only_hooks = []
+            if args.profile_every_n_iter is not None:
+                chief_only_hooks.append(
+                    tf.train.ProfilerHook(
+                        save_steps=args.profile_every_n_iter,
+                        output_dir=args.output_dir))
+            return tf.estimator.EstimatorSpec(
+                mode=tf.estimator.ModeKeys.TRAIN,
+                loss=self.loss,
+                train_op=self.train_op,
+                training_chief_hooks=chief_only_hooks)
+
+        if mode == tf.estimator.ModeKeys.EVAL:
+            self.is_training = False
+            return tf.estimator.EstimatorSpec(
+                mode=tf.estimator.ModeKeys.EVAL,
+                loss=self.loss)
+
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            self.is_training = False
+            return tf.estimator.EstimatorSpec(
+                mode=tf.estimator.ModeKeys.PREDICT,
+                predictions={'score': self.probability})
+
+        return None
 
     # create model
     def _create_model(self):
@@ -606,6 +643,25 @@ def eval(sess_config, input_hooks, model, test_init_op, test_steps, output_dir, 
                 print(f'ACC = {eval_acc}\nAUC = {eval_auc}')
 
 
+def build_receive_fn():
+    r'''Build input placeholders.
+    '''
+    inputs = {}
+    for f in LABEL_COLUMNS:
+        inputs[f] = tf.placeholder(
+            dtype=tf.int32, shape=[None])
+    for f in HASH_INPUTS:
+        inputs[f] = tf.placeholder(
+            dtype=tf.string, shape=[None])
+    # for f in COMBO_COLUMN:
+    #     inputs[f] = tf.placeholder(
+    #         dtype=tf.string, shape=[None])
+    # for f in TAG_COLUMN:
+    #     inputs[f] = tf.placeholder(
+    #         dtype=tf.string, shape=[None])
+    return tf.estimator.export.ServingInputReceiver(inputs, inputs)
+
+
 def main(stock_tf, tf_config=None, server=None):
     # check dataset and count data set size
     print('Checking dataset...')
@@ -753,19 +809,70 @@ def main(stock_tf, tf_config=None, server=None):
                  input_layer_partitioner=input_layer_partitioner,
                  dense_layer_partitioner=dense_layer_partitioner)
 
+    run_config = tf.estimator.RunConfig(session_config=sess_config)
+    estimator = tf.estimator.Estimator(model_fn=model._call, model_dir=checkpoint_dir, config=run_config)
+
+    args.mode = "train"
+    if args.mode == "evaluate":
+        estimator.evaluate(input_fn=lambda: build_model_input(test_file, batch_size, 1),
+                           steps=test_steps,
+                           hooks=hooks)
+    elif args.mode == "predict":
+        pred_result = estimator.predict(input_fn=lambda: build_model_input(test_file, batch_size, 1),
+                                        predict_keys=['score'],
+                                        hooks=hooks,
+                                        yield_single_examples=False)
+        print(next(pred_result))
+
+    elif args.mode == "train":
+        start = time.time()
+        train(sess_config, hooks, model, train_init_op, train_steps,
+              keep_checkpoint_max, checkpoint_dir, args.save_steps,
+              args.timeline, args.no_eval, tf_config, server,
+              stock_tf, args.incremental_ckpt)
+        throughput = 50000 / (time.time() - start) * 100
+        print("吞吐量： " + str(throughput))
+        with open("/home/r00813794/DeepRec/modelzoo/throughput_record.txt", "a+") as f:
+            f.writelines(f"esmm: {throughput}" + "\n")
+
+        estimator.export_saved_model(
+            checkpoint_dir,
+            build_receive_fn)
+        saved_model_path = ""
+        for item in os.listdir(checkpoint_dir):
+            item_path = os.path.join(checkpoint_dir, item)
+            if os.path.isdir(item_path):
+                saved_model_path = item_path
+                break
+
+        os.mkdir(os.path.join(saved_model_path, "1"))
+        items = os.listdir(saved_model_path)
+        for item in items:
+            if item != "1":  # 避免移动新创建的子文件夹
+                src_path = os.path.join(saved_model_path, item)
+                dst_path = os.path.join(saved_model_path, "1", item)
+                shutil.move(src_path, dst_path)
+
+    elif args.mode == "save":
+        estimator.export_saved_model(
+            checkpoint_dir,
+            build_receive_fn)
+    print("done")
+
     # Run model training and evaluation
-    start = time.time()
-    train(sess_config, hooks, model, train_init_op, train_steps,
-          keep_checkpoint_max, checkpoint_dir, args.save_steps,
-          args.timeline, args.no_eval, tf_config, server,
-          stock_tf, args.incremental_ckpt)
-    throughput = 50000 / (time.time() - start) * 100
-    print("吞吐量： " + str(throughput))
-    with open(os.path.join(args.output_dir, "esmm_throughput_record.txt"), "a+") as f:
-        f.writelines(f"esmm: {throughput}" + "\n")
-    if not (args.no_eval or tf_config):
-        eval(sess_config, hooks, model, test_init_op, test_steps,
-             model_dir, checkpoint_dir)
+    # start = time.time()
+    # train(sess_config, hooks, model, train_init_op, train_steps,
+    #       keep_checkpoint_max, checkpoint_dir, args.save_steps,
+    #       args.timeline, args.no_eval, tf_config, server,
+    #       stock_tf, args.incremental_ckpt)
+    # print("训练时长")
+    # print(time.time() - start)
+    # if not (args.no_eval or tf_config):
+    #     start = time.time()
+    #     eval(sess_config, hooks, model, test_init_op, test_steps,
+    #          model_dir, checkpoint_dir)
+    #     print("测试时长")
+    #     print(time.time() - start)
 
 
 def boolean_string(string):
