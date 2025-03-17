@@ -52,7 +52,7 @@ def stop_and_remove_container(container_name):
 
 
 def start_server(serving_id, server_memory, server_numa, serving_path, port, model_path, model_name, intra, inter,
-                 min_cluster_size=200, enable_xla=False, enable_onednn=False):
+                 enable_onednn=False):
     """Start the TensorFlow server with the specified parameters."""
     my_env = os.environ.copy()
 
@@ -64,25 +64,13 @@ def start_server(serving_id, server_memory, server_numa, serving_path, port, mod
         my_env['TF_ENABLE_ONEDNN_OPTS'] = "0"
         print("disable oneDNN")
 
-    if enable_xla:
-        my_env["TF_XLA_FLAGS"] = f"--tf_xla_auto_jit=2 --tf_xla_cpu_global_jit --tf_xla_enable_lazy_compilation=false --tf_mlir_enable_merge_control_flow_pass  --tf_xla_min_cluster_size={min_cluster_size} --tf_xla_disable_full_embedding_pipelining"
-        my_env["XLA_LLVM_UNROLL"] = "true"
-        print("enable XLA")
-        server_cmd = f"nohup numactl -m {server_memory} -C {server_numa} {serving_path} --port={port} --model_base_path={model_path} --model_name={model_name} --tensorflow_intra_op_parallelism={intra} --tensorflow_inter_op_parallelism={inter} --xla_cpu_compilation_enabled=true > output_{model_name}_{serving_id}.log 2>&1 &"
-    else:
-        try:
-            my_env.pop("TF_XLA_FLAGS")
-            my_env.pop("XLA_LLVM_UNROLL")
-        except KeyError:
-            print("disable XLA")
-        server_cmd = f"nohup numactl -m {server_memory} -C {server_numa} {serving_path} --port={port} --model_base_path={model_path} --model_name={model_name} --tensorflow_intra_op_parallelism={intra} --tensorflow_inter_op_parallelism={inter} --xla_cpu_compilation_enabled=false > output_{model_name}_{serving_id}.log 2>&1 &"
+    server_cmd = f"nohup numactl -m {server_memory} -C {server_numa} {serving_path} --port={port} --model_base_path={model_path} --model_name={model_name} --tensorflow_intra_op_parallelism={intra} --tensorflow_inter_op_parallelism={inter} > output_{model_name}_{serving_id}.log 2>&1 &"
 
     print("server_cmd")
     print(server_cmd)
-    result1 = subprocess.run("env | grep TF_ENABLE_ONEDNN_OPTS", shell=True, env=my_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    result2 = subprocess.run("env | grep TF_XLA_FLAGS", shell=True, env=my_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    result1 = subprocess.run("env | grep TF_ENABLE_ONEDNN_OPTS", shell=True, env=my_env, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True)
     print(result1.stdout)
-    print(result2.stdout)
     process = subprocess.Popen(server_cmd, shell=True, env=my_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
     print(stdout)
@@ -125,7 +113,7 @@ def save_to_file(filename, content):
 
 def start_server_and_client(meta_path: str, concurrency: str, batch: int, client_numa: list, server_numa: list,
                             measurement_interval: int, model_name: str, model_path: str, serving_path: str, ports: list,
-                            intra: int, inter: int, min_cluster_size: int, enable_xla: bool, enable_onednn: bool,
+                            intra: int, inter: int, enable_onednn: bool,
                             image: str = "nvcr.io/nvidia/tritonserver:24.05-py3-sdk"):
     subprocess.run(f"pkill -9 tensorflow_mode", shell=True)  # Kill previous instance
 
@@ -135,7 +123,7 @@ def start_server_and_client(meta_path: str, concurrency: str, batch: int, client
         server_process = Process(target=start_server,
                                  args=(
                                      i, i, server_numa[i], serving_path, ports[i], model_path, model_name, intra, inter,
-                                     min_cluster_size, enable_xla, enable_onednn))
+                                     enable_onednn))
         server_process.start()
         server_process_list.append(server_process)
 
@@ -192,7 +180,7 @@ def parse_perf_analyzer_output(meta_path, model_name, num_numa):
     return throughputs, p99_latencys
 
 
-def run_test(image, serving_path, meta_path, intra, inter, enable_xla, enable_onednn, test_method="entire"):
+def run_test(image, serving_path, meta_path, intra, inter, enable_onednn, test_method="entire"):
     numa_info = get_numa_info()
     print(numa_info)
     if test_method == "entire":
@@ -207,9 +195,8 @@ def run_test(image, serving_path, meta_path, intra, inter, enable_xla, enable_on
     measurement_interval = [12000, 12000, 12000, 12000, 10000]
 
     model_list = ["wide_and_deep", "dlrm", "deepfm", "dffm", "dssm"]
-    concurrency = ["24:52:4", "60:140:4", "20:52:4", "36:64:4", "60:120:4"]
-    batch = [256, 256, 512, 64, 512]
-    min_cluster_size_list = [200, 300, 300, 50, 200]
+    concurrency = ["40:60:4", "44:68:4", "28:48:4", "28:48:4", "36:56:4"]
+    batch = [64, 256, 256, 128, 512]
     ports = [8502 + i for i in range(len(numa_info))]
 
     output = {}
@@ -232,8 +219,7 @@ def run_test(image, serving_path, meta_path, intra, inter, enable_xla, enable_on
                                 client_numa=client_numa, server_numa=server_numa,
                                 measurement_interval=measurement_interval[i], model_name=model_list[i],
                                 model_path=saved_model_path, serving_path=serving_path, ports=ports, intra=intra,
-                                inter=inter, min_cluster_size=min_cluster_size_list[i], enable_xla=enable_xla,
-                                enable_onednn=enable_onednn, image=image)
+                                inter=inter, enable_onednn=enable_onednn, image=image)
 
 
 def boolean_string(string):
@@ -262,15 +248,11 @@ def get_arg_parser():
     parser.add_argument("--intra",
                         help="tensorflow_intra_op_parallelism",
                         type=int,
-                        default=1)
+                        default=0)
     parser.add_argument("--inter",
                         help="tensorflow_inter_op_parallelism",
                         type=int,
-                        default=-1)
-    parser.add_argument("--enable_XLA",
-                        help="enable XLA",
-                        type=boolean_string,
-                        default=False)
+                        default=0)
     parser.add_argument("--enable_oneDNN",
                         help="enable oneDNN",
                         type=boolean_string,
@@ -283,7 +265,7 @@ if __name__ == "__main__":
     parser = get_arg_parser()
     args = parser.parse_args()
     if args.test_method == "entire" or args.test_method == "single":
-        run_test(args.image, args.serving_path, args.meta_path, args.intra, args.inter, args.enable_XLA,
+        run_test(args.image, args.serving_path, args.meta_path, args.intra, args.inter,
                  args.enable_oneDNN, args.test_method)
     else:
         print("测试方法参数有误，请输入'entire'或'single''")

@@ -65,21 +65,22 @@ def run_train(test_method, meta_path, criteo_data_path, taobao_data_path):
     server_numa = numa_info["node0"]
     print(f"server_numa: {server_numa}")
 
-    model_list = ["wide_and_deep", "dlrm", "deepfm", "dffm", "dssm", "esmm"]
+    model_list = ["wide_and_deep", "dlrm", "deepfm", "dffm", "dssm"]
 
-    if test_method == "entire":
+    if test_method == "single":
         server_numa = numa_info["node0"]
     else:
         server_numa = "0-" + str(int(cpu_info) - 1)
 
     for i in range(len(model_list)):
-        if model_list[i] == "dssm" or model_list[i] == "esmm":
+        if model_list[i] == "dssm":
             train_cmd = generate_train_cmd(server_numa, model_list[i], meta_path, taobao_data_path)
         else:
             train_cmd = generate_train_cmd(server_numa, model_list[i], meta_path, criteo_data_path)
         stdout, stderr = run_command(train_cmd)
         if stderr:
             print(model_list[i] + " 训练未完成")
+            print(stdout)
             print(stderr)
         else:
             print(model_list[i] + " 训练完成")
@@ -99,19 +100,16 @@ def get_arg_parser():
     parser.add_argument("--test_method",
                         help="single numa or entire machine",
                         type=str,
-                        default="single")
+                        default="entire")
     parser.add_argument("--meta_path",
                         help="full path of modelzoo",
-                        type=str,
-                        default="/home/r00813794")
+                        type=str)
     parser.add_argument("--criteo_data_location",
-                        help="set the path of tritonclient",
-                        type=str,
-                        default="/home/r00813794/modelzoo/wide_and_deep/data")
+                        help="the path of criteo_data",
+                        type=str)
     parser.add_argument("--taobao_data_location",
-                        help="set the path of tritonclient",
-                        type=str,
-                        default="/home/r00813794/modelzoo/dssm/data")
+                        help="the path of taobao_data",
+                        type=str)
 
     return parser
 
