@@ -4,10 +4,10 @@ import json
 import math
 import numbers
 import os
-import time
-
 import tensorflow as tf
 from tensorflow.python.ops import partitioned_variables
+from tensorflow.python.client import timeline
+import time
 
 # Set to INFO for tracking training, default is WARN. ERROR for least messages
 tf.logging.set_verbosity(tf.logging.INFO)
@@ -34,31 +34,29 @@ HASH_INPUTS = [
 ]
 
 HASH_BUCKET_SIZES = {
-    'pid': 10,
-    'adgroup_id': 100000,
-    'cate_id': 10000,
-    'campaign_id': 100000,
-    'customer': 100000,
-    'brand': 100000,
-    'user_id': 100000,
-    'cms_segid': 100,
-    'cms_group_id': 100,
-    'final_gender_code': 10,
-    'age_level': 10,
-    'pvalue_level': 10,
-    'shopping_level': 10,
-    'occupation': 10,
-    'new_user_class_level': 10,
-    'tag_category_list': 100000,
-    'tag_brand_list': 100000,
-    'price': 50
-}
+        'pid': 10,
+        'adgroup_id': 100000,
+        'cate_id': 10000,
+        'campaign_id': 100000,
+        'customer': 100000,
+        'brand': 100000,
+        'user_id': 100000,
+        'cms_segid': 100,
+        'cms_group_id': 100,
+        'final_gender_code': 10,
+        'age_level': 10,
+        'pvalue_level': 10,
+        'shopping_level': 10,
+        'occupation': 10,
+        'new_user_class_level': 10,
+        'tag_category_list': 100000,
+        'tag_brand_list': 100000,
+        'price': 50
+        }
 
 defaults = [[0]] * len(LABEL_COLUMNS) + [[' ']] * len(HASH_INPUTS)
 ALL_FEATURE_COLUMNS = HASH_INPUTS
 headers = LABEL_COLUMNS + ALL_FEATURE_COLUMNS
-
-
 class ESMM():
     def __init__(self,
                  input,
@@ -163,10 +161,10 @@ class ESMM():
     def _create_dense_layer(self, input, num_hidden_units, activation, layer_name):
         with tf.variable_scope(layer_name, reuse=tf.AUTO_REUSE) as mlp_layer_scope:
             dense_layer = tf.layers.dense(input,
-                                          units=num_hidden_units,
-                                          activation=activation,
-                                          kernel_regularizer=self._l2_regularization,
-                                          name=mlp_layer_scope)
+                                       units=num_hidden_units,
+                                       activation=activation,
+                                       kernel_regularizer=self._l2_regularization,
+                                       name=mlp_layer_scope)
             self._add_layer_summary(dense_layer, mlp_layer_scope.name)
         return dense_layer
 
@@ -187,7 +185,7 @@ class ESMM():
         return l2
 
     def _make_scope(self, name, bf16):
-        if (bf16):
+        if(bf16):
             return tf.variable_scope(name, reuse=tf.AUTO_REUSE).keep_weights(dtype=tf.float32)
         else:
             return tf.variable_scope(name, reuse=tf.AUTO_REUSE)
@@ -256,27 +254,27 @@ class ESMM():
                                    reuse=tf.AUTO_REUSE):
                 for layer_id, num_hidden_units in enumerate(self._user_mlp):
                     user_emb = self._create_dense_layer(user_emb,
-                                                        num_hidden_units,
-                                                        tf.nn.relu,
-                                                        f'user_mlp_{layer_id}')
+                                                         num_hidden_units,
+                                                         tf.nn.relu,
+                                                         f'user_mlp_{layer_id}')
 
             with tf.variable_scope('item_mlp_layer',
                                    partitioner=self._dense_layer_partitioner,
                                    reuse=tf.AUTO_REUSE):
                 for layer_id, num_hidden_units in enumerate(self._item_mlp):
                     item_emb = self._create_dense_layer(item_emb,
-                                                        num_hidden_units,
-                                                        tf.nn.relu,
-                                                        f'item_mlp_{layer_id}')
+                                                         num_hidden_units,
+                                                         tf.nn.relu,
+                                                         f'item_mlp_{layer_id}')
 
             with tf.variable_scope('combo_mlp_layer',
                                    partitioner=self._dense_layer_partitioner,
                                    reuse=tf.AUTO_REUSE):
                 for layer_id, num_hidden_units in enumerate(self._combo_mlp):
                     combo_emb = self._create_dense_layer(combo_emb,
-                                                         num_hidden_units,
-                                                         tf.nn.relu,
-                                                         f'combo_mlp_{layer_id}')
+                                                          num_hidden_units,
+                                                          tf.nn.relu,
+                                                          f'combo_mlp_{layer_id}')
 
             concat = tf.concat([user_emb, item_emb, combo_emb], axis=1)
 
@@ -293,13 +291,13 @@ class ESMM():
                                reuse=tf.AUTO_REUSE):
             for layer_id, num_hidden_units in enumerate(self._cvr_mlp):
                 net = self._create_dense_layer(net,
-                                               num_hidden_units,
-                                               tf.nn.relu,
-                                               f'cvr_mlp_hiddenlayer_{layer_id}')
+                                                num_hidden_units,
+                                                tf.nn.relu,
+                                                f'cvr_mlp_hiddenlayer_{layer_id}')
             net = self._create_dense_layer(net,
-                                           1,
-                                           tf.math.sigmoid,
-                                           'cvr_mlp_hiddenlayer_last')
+                                            1,
+                                            tf.math.sigmoid,
+                                            'cvr_mlp_hiddenlayer_last')
         return net
 
     def _build_ctr_model(self, net):
@@ -308,15 +306,14 @@ class ESMM():
                                reuse=tf.AUTO_REUSE):
             for layer_id, num_hidden_units in enumerate(self._ctr_mlp):
                 net = self._create_dense_layer(net,
-                                               num_hidden_units,
-                                               tf.nn.relu,
-                                               f'ctr_mlp_hiddenlayer_{layer_id}')
+                                                num_hidden_units,
+                                                tf.nn.relu,
+                                                f'ctr_mlp_hiddenlayer_{layer_id}')
             net = self._create_dense_layer(net,
-                                           1,
-                                           tf.math.sigmoid,
-                                           'ctr_mlp_hiddenlayer_last')
+                                            1,
+                                            tf.math.sigmoid,
+                                            'ctr_mlp_hiddenlayer_last')
         return net
-
 
 # generate dataset pipline
 def build_model_input(filename, batch_size, num_epochs, seed, stock_tf, workqueue=None):
@@ -362,7 +359,6 @@ def build_model_input(filename, batch_size, num_epochs, seed, stock_tf, workqueu
     dataset = dataset.prefetch(2)
     return dataset
 
-
 # generate feature columns
 def build_feature_columns(stock_tf,
                           emb_fusion,
@@ -397,9 +393,9 @@ def build_feature_columns(stock_tf,
                     if emb_var_filter == 'cbf':
                         # CBF-based feature filter
                         filter_option = tf.CBFFilter(filter_freq=3,
-                                                     max_element_size=2 ** 30,
-                                                     false_positive_probability=0.01,
-                                                     counter_type=tf.int64)
+                                                    max_element_size=2**30,
+                                                    false_positive_probability=0.01,
+                                                    counter_type=tf.int64)
                     elif emb_var_filter == 'counter':
                         # Counter-based feature filter
                         filter_option = tf.CounterFilter(filter_freq=3)
@@ -411,8 +407,8 @@ def build_feature_columns(stock_tf,
                     if emb_variable:
                         '''Embedding Variable Feature'''
                         column = tf.feature_column.categorical_column_with_embedding(column_name,
-                                                                                     dtype=tf.string,
-                                                                                     ev_option=ev_opt)
+                                                                                    dtype=tf.string,
+                                                                                    ev_option=ev_opt)
                     elif adaptive_emb:
                         '''                 Adaptive Embedding Feature Part 2 of 2
                         Except the following code, a dict, 'adaptive_mask_tensors', is needede as the input of
@@ -432,13 +428,14 @@ def build_feature_columns(stock_tf,
                 if not stock_tf and emb_fusion:
                     '''Embedding Fusion Feature'''
                     embedding_column = tf.feature_column.embedding_column(column,
-                                                                          dimension=16,
-                                                                          combiner='mean',
-                                                                          do_fusion=emb_fusion)
+                                                                        dimension=16,
+                                                                        combiner='mean',
+                                                                        do_fusion=emb_fusion)
                 else:
                     embedding_column = tf.feature_column.embedding_column(column,
-                                                                          dimension=16,
-                                                                          combiner='mean')
+                                                            dimension=16,
+                                                            combiner='mean')
+
 
                 if column_name in USER_COLUMN:
                     user_column.append(embedding_column)
@@ -468,9 +465,9 @@ def build_feature_columns(stock_tf,
                 if emb_var_filter == 'cbf':
                     # CBF-based feature filter
                     filter_option = tf.CBFFilter(filter_freq=3,
-                                                 max_element_size=2 ** 30,
-                                                 false_positive_probability=0.01,
-                                                 counter_type=tf.int64)
+                                                max_element_size=2**30,
+                                                false_positive_probability=0.01,
+                                                counter_type=tf.int64)
                 elif emb_var_filter == 'counter':
                     # Counter-based feature filter
                     filter_option = tf.CounterFilter(filter_freq=3)
@@ -482,8 +479,8 @@ def build_feature_columns(stock_tf,
                 if emb_variable:
                     '''Embedding Variable Feature'''
                     column = tf.feature_column.categorical_column_with_embedding(column_name,
-                                                                                 dtype=tf.string,
-                                                                                 ev_option=ev_opt)
+                                                                                dtype=tf.string,
+                                                                                ev_option=ev_opt)
                 elif adaptive_emb:
                     '''                 Adaptive Embedding Feature Part 2 of 2
                     Except the following code, a dict, 'adaptive_mask_tensors', is needede as the input of
@@ -503,13 +500,14 @@ def build_feature_columns(stock_tf,
             if not stock_tf and emb_fusion:
                 '''Embedding Fusion Feature'''
                 embedding_column = tf.feature_column.embedding_column(column,
-                                                                      dimension=16,
-                                                                      combiner='mean',
-                                                                      do_fusion=emb_fusion)
+                                                                    dimension=16,
+                                                                    combiner='mean',
+                                                                    do_fusion=emb_fusion)
             else:
                 embedding_column = tf.feature_column.embedding_column(column,
-                                                                      dimension=16,
-                                                                      combiner='mean')
+                                                        dimension=16,
+                                                        combiner='mean')
+
 
             if column_name in USER_COLUMN:
                 user_column.append(embedding_column)
@@ -518,7 +516,6 @@ def build_feature_columns(stock_tf,
             elif column_name in COMBO_COLUMN:
                 combo_column.append(embedding_column)
     return user_column, item_column, combo_column
-
 
 def train(sess_config,
           input_hooks,
@@ -538,14 +535,14 @@ def train(sess_config,
     hooks.extend(input_hooks)
 
     scaffold = tf.train.Scaffold(
-        local_init_op=tf.group(tf.local_variables_initializer(), train_init_op),
+        local_init_op=tf.group(tf.local_variables_initializer(), data_init_op),
         saver=tf.train.Saver(max_to_keep=args.keep_checkpoint_max, sharded=True))
 
     stop_hook = tf.train.StopAtStepHook(last_step=train_steps)
     log_hook = tf.train.LoggingTensorHook(
         {'steps': model.global_step,
          'loss': model.loss
-         }, every_n_iter=100)
+        }, every_n_iter=100)
     hooks.append(stop_hook)
     hooks.append(log_hook)
 
@@ -605,7 +602,6 @@ def eval(sess_config, input_hooks, model, test_init_op, test_steps, output_dir, 
                 print(f'Evaluation complete:[{_in}/{test_steps}]')
                 print(f'ACC = {eval_acc}\nAUC = {eval_auc}')
 
-
 def main(stock_tf, tf_config=None, server=None):
     # check dataset and count data set size
     print('Checking dataset...')
@@ -633,8 +629,8 @@ def main(stock_tf, tf_config=None, server=None):
 
     # set batch size, eporch & steps
     batch_size = math.ceil(
-        args.batch_size / args.micro_batch
-    ) if args.micro_batch and not stock_tf else args.batch_size
+                  args.batch_size / args.micro_batch
+                  ) if args.micro_batch and not stock_tf else args.batch_size
     if args.steps == 0:
         no_epochs = 100
         train_steps = math.ceil(
@@ -708,13 +704,13 @@ def main(stock_tf, tf_config=None, server=None):
     # create variable partitioner for distributed training
     num_ps_replicas = len(tf_config['ps_hosts']) if tf_config else 0
     input_layer_partitioner = partitioned_variables.min_max_variable_partitioner(
-        max_partitions=num_ps_replicas,
-        min_slice_size=args.input_layer_partitioner <<
-                       20) if args.input_layer_partitioner else None
+                                max_partitions=num_ps_replicas,
+                                min_slice_size=args.input_layer_partitioner <<
+                                    20) if args.input_layer_partitioner else None
     dense_layer_partitioner = partitioned_variables.min_max_variable_partitioner(
-        max_partitions=num_ps_replicas,
-        min_slice_size=args.dense_layer_partitioner <<
-                       10) if args.dense_layer_partitioner else None
+                                max_partitions=num_ps_replicas,
+                                min_slice_size=args.dense_layer_partitioner <<
+                                    10) if args.dense_layer_partitioner else None
 
     # Session config
     sess_config = tf.ConfigProto()
@@ -754,26 +750,19 @@ def main(stock_tf, tf_config=None, server=None):
                  dense_layer_partitioner=dense_layer_partitioner)
 
     # Run model training and evaluation
-    start = time.time()
     train(sess_config, hooks, model, train_init_op, train_steps,
           keep_checkpoint_max, checkpoint_dir, args.save_steps,
           args.timeline, args.no_eval, tf_config, server,
           stock_tf, args.incremental_ckpt)
-    throughput = 50000 / (time.time() - start) * 100
-    print("吞吐量： " + str(throughput))
-    with open(os.path.join(args.output_dir, "esmm_throughput_record.txt"), "a+") as f:
-        f.writelines(f"esmm: {throughput}" + "\n")
     if not (args.no_eval or tf_config):
         eval(sess_config, hooks, model, test_init_op, test_steps,
              model_dir, checkpoint_dir)
-
 
 def boolean_string(string):
     low_string = string.lower()
     if low_string not in {'false', 'true'}:
         raise ValueError('Not a valid boolean string')
     return low_string == 'true'
-
 
 def get_arg_parser():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -908,7 +897,6 @@ def get_arg_parser():
 
     return parser
 
-
 # Parse distributed training configuration and generate cluster information
 def generate_cluster_info(TF_CONFIG):
     print(f'Running distributed training with TF_CONFIG: {TF_CONFIG}')
@@ -934,7 +922,7 @@ def generate_cluster_info(TF_CONFIG):
     task_config = tf_config.get('task')
     task_type = task_config.get('type')
     task_index = task_config.get('index') + (1 if task_type == 'worker'
-                                                  and chief_hosts else 0)
+                                             and chief_hosts else 0)
 
     if task_type == 'chief':
         task_type = 'worker'
@@ -959,12 +947,11 @@ def generate_cluster_info(TF_CONFIG):
                      'is_chief': is_chief}
 
         tf_device = tf.device(tf.train.replica_device_setter(
-            worker_device=f'/job:worker/task:{task_index}',
-            cluster=cluster))
+                              worker_device=f'/job:worker/task:{task_index}',
+                              cluster=cluster))
         return tf_config, server, tf_device
     else:
         raise ValueError(f'[TF_CONFIG ERROR] Task type or index error.')
-
 
 # Some DeepRec's features are enabled by ENV.
 # This func is used to set ENV and enable these features.
@@ -991,18 +978,15 @@ def set_env_for_DeepRec():
         if args.smartstaged and not args.tf:
             os.environ["TF_GPU_THREAD_COUNT"] = "16"
 
-
 def check_stock_tf():
     import pkg_resources
     detailed_version = pkg_resources.get_distribution('Tensorflow').version
     return not ('deeprec' in detailed_version)
 
-
 def check_DeepRec_features():
     return args.smartstaged or args.emb_fusion or args.op_fusion or args.micro_batch or args.bf16 or \
-        args.ev or args.adaptive_emb or args.dynamic_ev or (args.optimizer == 'adamasync') or \
-        args.incremental_ckpt or args.workqueue and args.group_embedding
-
+           args.ev or args.adaptive_emb or args.dynamic_ev or (args.optimizer == 'adamasync') or \
+           args.incremental_ckpt  or args.workqueue and args.group_embedding
 
 if __name__ == '__main__':
     parser = get_arg_parser()

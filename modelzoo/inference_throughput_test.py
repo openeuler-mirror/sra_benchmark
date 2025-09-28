@@ -1,10 +1,8 @@
 import argparse
-import json
 import os
 import re
 import subprocess
 import time
-# import pandas as pd
 from multiprocessing import Process
 
 
@@ -41,7 +39,6 @@ def exec_command_in_container(container_name, command):
 
 
 def run_command(cmd):
-
     """Run a shell command and return its output."""
     process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
@@ -54,13 +51,27 @@ def stop_and_remove_container(container_name):
     run_command(f"docker rm {container_name}")
 
 
-def start_server(serving_id, server_memory, server_numa, serving_path, port, model_path, model_name):
+def start_server(serving_id, server_memory, server_numa, serving_path, port, model_path, model_name, intra, inter,
+                 enable_onednn=False):
     """Start the TensorFlow server with the specified parameters."""
-    server_cmd = f"nohup numactl -m {server_memory} -C {server_numa} {serving_path} --port={port} --model_base_path={model_path} --model_name={model_name} --tensorflow_intra_op_parallelism=1 --tensorflow_inter_op_parallelism=-1 > output_{model_name}_{serving_id}.log 2>&1 &"
+    my_env = os.environ.copy()
+
+    if enable_onednn:
+        # enable_onednn_cmds = """export TF_ENABLE_ONEDNN_OPTS=1"""
+        my_env['TF_ENABLE_ONEDNN_OPTS'] = "1"
+        print("enable oneDNN")
+    else:
+        my_env['TF_ENABLE_ONEDNN_OPTS'] = "0"
+        print("disable oneDNN")
+
+    server_cmd = f"nohup numactl -m {server_memory} -C {server_numa} {serving_path} --port={port} --model_base_path={model_path} --model_name={model_name} --tensorflow_intra_op_parallelism={intra} --tensorflow_inter_op_parallelism={inter} > output_{model_name}_{serving_id}.log 2>&1 &"
+
     print("server_cmd")
     print(server_cmd)
-
-    process = subprocess.Popen(server_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    result1 = subprocess.run("env | grep TF_ENABLE_ONEDNN_OPTS", shell=True, env=my_env, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True)
+    print(result1.stdout)
+    process = subprocess.Popen(server_cmd, shell=True, env=my_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
     print(stdout)
     print(stderr)
@@ -101,16 +112,18 @@ def save_to_file(filename, content):
 
 
 def start_server_and_client(meta_path: str, concurrency: str, batch: int, client_numa: list, server_numa: list,
-                            measurement_interval: int,
-                            model_name: str, model_path: str, serving_path: str, ports: list,
-                            image="nvcr.io/nvidia/tritonserver:24.05-py3-sdk"):
+                            measurement_interval: int, model_name: str, model_path: str, serving_path: str, ports: list,
+                            intra: int, inter: int, enable_onednn: bool,
+                            image: str = "nvcr.io/nvidia/tritonserver:24.05-py3-sdk"):
     subprocess.run(f"pkill -9 tensorflow_mode", shell=True)  # Kill previous instance
 
     # Start the TensorFlow server in a separate process
     server_process_list = []
     for i in range(len(server_numa)):
         server_process = Process(target=start_server,
-                                 args=(i, i, server_numa[i], serving_path, ports[i], model_path, model_name))
+                                 args=(
+                                     i, i, server_numa[i], serving_path, ports[i], model_path, model_name, intra, inter,
+                                     enable_onednn))
         server_process.start()
         server_process_list.append(server_process)
 
@@ -122,7 +135,7 @@ def start_server_and_client(meta_path: str, concurrency: str, batch: int, client
                      "name": "client" + str(i),
                      "numa": client_numa[i],
                      "model_name": model_name,
-                     "exec_command": f"perf_analyzer --concurrency-range {concurrency} -p {measurement_interval} --latency-threshold 300 -f perf.csv -m {model_name} --service-kind tfserving -i grpc --request-distribution poisson -b {batch} -u localhost:{ports[i]} --percentile 99 --input-data=random"}
+                     "exec_command": f"perf_analyzer --concurrency-range {concurrency} -p {measurement_interval} --latency-threshold 200 -f perf.csv -m {model_name} --service-kind tfserving -i grpc --request-distribution poisson -b {batch} -u localhost:{ports[i]} --percentile 99 --input-data=random"}
         request_process = Process(target=start_pressure_test, args=(meta_path, container,))
         request_process.start()
         request_process_list.append(request_process)
@@ -131,13 +144,13 @@ def start_server_and_client(meta_path: str, concurrency: str, batch: int, client
         num_concurrency = (int(concurrency_list[1]) - int(concurrency_list[0])) // int(concurrency_list[2]) + 1
     else:
         num_concurrency = (int(concurrency_list[1]) - int(concurrency_list[0])) // 1 + 1
-    sleep_time = num_concurrency * measurement_interval // 1000 * 8
+    sleep_time = num_concurrency * measurement_interval // 1000 * 5
     time.sleep(sleep_time)
 
     for p in server_process_list:
         p.terminate()
         p.join()
-    for p in server_process_list:
+    for p in request_process_list:
         p.terminate()
         p.join()
 
@@ -167,25 +180,23 @@ def parse_perf_analyzer_output(meta_path, model_name, num_numa):
     return throughputs, p99_latencys
 
 
-def run_test(image, serving_path, meta_path, test_method="entire"):
+def run_test(image, serving_path, meta_path, intra, inter, enable_onednn, test_method="entire"):
     numa_info = get_numa_info()
     print(numa_info)
     if test_method == "entire":
         client_numa = [v for k, v in numa_info.items()]
         server_numa = client_numa
-        num_numa = len(numa_info)
         print(f"server_numa: {server_numa}")
         print(f"client_numa: {client_numa}")
     else:
         # 使用numa0做serve, numa1做client
-        server_numa = numa_info["node0"]
-        client_numa = numa_info["node1"]
-        num_numa = 1
-    measurement_interval = [15000, 12000, 16000, 14000, 10000]
+        server_numa = [numa_info["node0"]]
+        client_numa = [numa_info["node1"]]
+    measurement_interval = [12000, 12000, 12000, 12000, 10000]
 
     model_list = ["wide_and_deep", "dlrm", "deepfm", "dffm", "dssm"]
-    concurrency = ["12:24:4", "40:52:4", "32:44:4", "24:36:4", "44:56:4"]
-    batch = [128, 256, 256, 256, 256]
+    concurrency = ["40:60:4", "44:68:4", "28:48:4", "28:48:4", "36:56:4"]
+    batch = [64, 256, 256, 128, 512]
     ports = [8502 + i for i in range(len(numa_info))]
 
     output = {}
@@ -204,21 +215,18 @@ def run_test(image, serving_path, meta_path, test_method="entire"):
                 saved_model_path = item_path
                 break
 
-        start_server_and_client(meta_path=meta_path, concurrency=concurrency[i], batch=batch[i], client_numa=client_numa,
-                                server_numa=server_numa, measurement_interval=measurement_interval[i],
-                                model_name=model_list[i],
-                                model_path=saved_model_path,
-                                serving_path=serving_path,
-                                ports=ports, image=image)
+        start_server_and_client(meta_path=meta_path, concurrency=concurrency[i], batch=batch[i],
+                                client_numa=client_numa, server_numa=server_numa,
+                                measurement_interval=measurement_interval[i], model_name=model_list[i],
+                                model_path=saved_model_path, serving_path=serving_path, ports=ports, intra=intra,
+                                inter=inter, enable_onednn=enable_onednn, image=image)
 
-        throughputs, p99_latencys = parse_perf_analyzer_output(meta_path, model_list[i], num_numa)
-        if len(throughputs) == num_numa:
-            output[model_list[i]]["throughput"] = sum(throughputs)
-        else:
-            output[model_list[i]]["throughput"] = 0
-            print(f"{model_list[i]}参数设置不合适")
-    with open(os.path.join(meta_path, "modelzoo", "inference_throughput.txt"), 'a', encoding='utf-8') as file:
-        json.dump(output, file, indent=4)
+
+def boolean_string(string):
+    low_string = string.lower()
+    if low_string not in {'false', 'true'}:
+        raise ValueError('Not a valid boolean string')
+    return low_string == 'true'
 
 
 def get_arg_parser():
@@ -228,29 +236,36 @@ def get_arg_parser():
                         type=str,
                         default="entire")
     parser.add_argument("--serving_path",
-                        help="set the path of tritonclient",
-                        type=str,
-                        default="/home/r00813794/tf-serving/serving-1.15.0/bazel-bin/tensorflow_serving/model_servers/tensorflow_model_server")
+                        help="set the path of TF-serving",
+                        type=str)
     parser.add_argument("--image",
                         help="the image name of tritonclient",
                         type=str,
                         default="nvcr.io/nvidia/tritonserver:24.05-py3-sdk")
-    parser.add_argument("--mate_path",
+    parser.add_argument("--meta_path",
                         help="the full path of modelzoo .ie modelzoo location",
-                        type=str,
-                        default="/home/r00813794")
+                        type=str)
+    parser.add_argument("--intra",
+                        help="tensorflow_intra_op_parallelism",
+                        type=int,
+                        default=0)
+    parser.add_argument("--inter",
+                        help="tensorflow_inter_op_parallelism",
+                        type=int,
+                        default=0)
+    parser.add_argument("--enable_oneDNN",
+                        help="enable oneDNN",
+                        type=boolean_string,
+                        default=False)
 
     return parser
 
 
-if "__main__" == __name__:
+if __name__ == "__main__":
     parser = get_arg_parser()
     args = parser.parse_args()
-    # 整机压测
-    if args.test_method == "entire":
-        run_test(args.image, args.serving_path, args.mate_path)
-    # 单numa压测
-    elif args.test_method == "single":
-        run_test(args.image, args.serving_path, args.mate_path, args.test_method)
+    if args.test_method == "entire" or args.test_method == "single":
+        run_test(args.image, args.serving_path, args.meta_path, args.intra, args.inter,
+                 args.enable_oneDNN, args.test_method)
     else:
         print("测试方法参数有误，请输入'entire'或'single''")

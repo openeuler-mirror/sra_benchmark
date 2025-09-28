@@ -1,4 +1,21 @@
-# -*- coding:utf-8 -*-
+# Copyright (c) 2022 Intel Corporation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+# Modifications:
+# 2025.09.28. BoostKit: The DFFM model is added.
+
+
 import argparse
 import collections
 import json
@@ -51,35 +68,6 @@ HASH_BUCKET_SIZES = {
     'C24': 250000,
     'C25': 400,
     'C26': 100000
-}
-
-EMBEDDING_DIMENSIONS = {
-    'C1': 64,
-    'C2': 64,
-    'C3': 128,
-    'C4': 128,
-    'C5': 64,
-    'C6': 64,
-    'C7': 64,
-    'C8': 64,
-    'C9': 64,
-    'C10': 128,
-    'C11': 64,
-    'C12': 128,
-    'C13': 64,
-    'C14': 64,
-    'C15': 64,
-    'C16': 128,
-    'C17': 64,
-    'C18': 64,
-    'C19': 64,
-    'C20': 64,
-    'C21': 128,
-    'C22': 64,
-    'C23': 64,
-    'C24': 128,
-    'C25': 64,
-    'C26': 128
 }
 
 EMBEDDING_DIMENSIONS = {

@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
+# Modifications:
+# 2025.09.28. BoostKit: Shielding Variable Length Features
+
 import argparse
 import collections
 import json
